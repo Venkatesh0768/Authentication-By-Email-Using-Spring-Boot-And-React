@@ -41,6 +41,15 @@ public class AuthService {
     private long jwtExpiration;
 
     @Transactional
+    public void requestPasswordReset(String email) {
+        userRepository.findByEmail(email)
+                .ifPresent(user -> {
+                    // Send OTP for password reset without revealing whether the email exists to the caller
+                    otpService.generateAndSendPasswordResetOTP(email);
+                });
+    }
+
+    @Transactional
     public ApiResponse signup(SignupRequest request) {
         // Validate email uniqueness
         if (userRepository.existsByEmail(request.getEmail())) {
@@ -153,6 +162,29 @@ public class AuthService {
                 })
                 .orElseThrow(() -> new InvalidTokenException("Invalid refresh token"));
     }
+
+
+    @Transactional
+    public ApiResponse resetPassword(ResetPasswordRequest request) {
+
+        boolean isValid = otpService.validateOTP(request.getEmail(), request.getOtp());
+
+        if (!isValid) {
+            throw new InvalidOTPException("Invalid or expired OTP");
+        }
+
+        User user = userRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> new UserNotFoundException("User not found"));
+
+        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        userRepository.save(user);
+
+        return new ApiResponse(true,
+                "Password reset successful! Please login with your new password.",
+                null);
+    }
+
+
 
     private UserDTO convertToUserDTO(User user) {
         return UserDTO.builder()

@@ -1,5 +1,5 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
-import { authAPI } from '../services/api';
+import { authAPI, setSession, clearSession } from '../services/api';
 
 const AuthContext = createContext(null);
 
@@ -24,8 +24,11 @@ export const AuthProvider = ({ children }) => {
     const response = await authAPI.login(data);
     const { accessToken, refreshToken, user } = response.data;
 
-    localStorage.setItem('accessToken', accessToken);
-    localStorage.setItem('refreshToken', refreshToken);
+    if (!accessToken || !refreshToken) {
+      throw new Error('Invalid response: missing tokens');
+    }
+
+    setSession({ accessToken, refreshToken });
     localStorage.setItem('user', JSON.stringify(user));
     setUser(user);
 
@@ -42,10 +45,18 @@ export const AuthProvider = ({ children }) => {
     return response.data;
   };
 
+  const forgotPassword = async (email) => {
+    const response = await authAPI.forgotPassword({ email });
+    return response.data;
+  };
+
+  const resetPassword = async (data) => {
+    const response = await authAPI.resetPassword(data);
+    return response.data;
+  };
+
   const logout = () => {
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
-    localStorage.removeItem('user');
+    clearSession();
     setUser(null);
   };
 
@@ -62,6 +73,8 @@ export const AuthProvider = ({ children }) => {
         login,
         verifyOTP,
         resendOTP,
+        forgotPassword,
+        resetPassword,
         logout,
         hasRole,
         isAuthenticated: !!user,

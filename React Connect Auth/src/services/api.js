@@ -9,12 +9,32 @@ const api = axios.create({
   },
 });
 
+let accessToken = null; // keep in memory
+const refreshTokenKey = 'refreshToken'; // localStorage key
+
+export function setSession(tokens) {
+  accessToken = tokens?.accessToken ?? null;
+  if (tokens?.refreshToken) {
+    localStorage.setItem(refreshTokenKey, tokens.refreshToken);
+  }
+}
+
+export function clearSession() {
+  accessToken = null;
+  localStorage.removeItem(refreshTokenKey);
+  localStorage.removeItem('user');
+}
+
 // Request interceptor to add token
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('accessToken');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    // Don't add token to forgot-password and reset-password endpoints
+    // as they should be public according to backend config
+    const publicAuthEndpoints = ['/auth/forgot-password', '/auth/reset-password'];
+    const isPublicEndpoint = publicAuthEndpoints.some(endpoint => config.url.includes(endpoint));
+    
+    if (accessToken && !isPublicEndpoint) {
+      config.headers.Authorization = `Bearer ${accessToken}`;
     }
     return config;
   },
@@ -22,31 +42,55 @@ api.interceptors.request.use(
 );
 
 // Response interceptor to handle token refresh
+let isRefreshing = false;
+let pending = [];
+const processQueue = (error, token = null) => {
+  pending.forEach(p => (error ? p.reject(error) : p.resolve(token)));
+  pending = [];
+};
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+    const status = error?.response?.status;
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
-      originalRequest._retry = true;
+    if (status === 401 && !originalRequest.__isRetryRequest) {
+      originalRequest.__isRetryRequest = true;
+
+      const storedRefresh = localStorage.getItem(refreshTokenKey);
+      if (!storedRefresh) {
+        clearSession();
+        window.location.href = '/login';
+        return Promise.reject(error);
+      }
+
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          pending.push({ resolve, reject });
+        }).then((newToken) => {
+          originalRequest.headers.Authorization = `Bearer ${newToken}`;
+          return api.request(originalRequest);
+        });
+      }
 
       try {
-        const refreshToken = localStorage.getItem('refreshToken');
-        const response = await axios.post(`${API_BASE_URL}/auth/refresh-token`, {
-          refreshToken,
+        isRefreshing = true;
+        const resp = await api.post('/auth/refresh-token', null, {
+          headers: { Authorization: `Bearer ${storedRefresh}` },
         });
-
-        const { accessToken } = response.data;
-        localStorage.setItem('accessToken', accessToken);
-
-        originalRequest.headers.Authorization = `Bearer ${accessToken}`;
-        return api(originalRequest);
+        const { accessToken: newAccess } = resp.data;
+        accessToken = newAccess;
+        processQueue(null, newAccess);
+        originalRequest.headers.Authorization = `Bearer ${newAccess}`;
+        return api.request(originalRequest);
       } catch (refreshError) {
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
-        localStorage.removeItem('user');
+        processQueue(refreshError);
+        clearSession();
         window.location.href = '/login';
         return Promise.reject(refreshError);
+      } finally {
+        isRefreshing = false;
       }
     }
 
@@ -59,6 +103,8 @@ export const authAPI = {
   login: (data) => api.post('/auth/login', data),
   verifyOTP: (data) => api.post('/auth/verify-otp', data),
   resendOTP: (email) => api.post(`/auth/resend-otp?email=${email}`),
+  forgotPassword: (data) => api.post('/auth/forgot-password', data),
+  resetPassword: (data) => api.post('/auth/reset-password', data),
   refreshToken: (refreshToken) => api.post('/auth/refresh-token', { refreshToken }),
 };
 

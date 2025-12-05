@@ -29,4 +29,23 @@ public class EmailService {
             throw new EmailSendingException("Failed to send OTP email", e);
         }
     }
+
+    public void sendPasswordResetOTPEmail(String to, String otpCode) {
+        try {
+            org.springframework.mail.SimpleMailMessage message =
+                    new org.springframework.mail.SimpleMailMessage();
+
+            message.setTo(to);
+            message.setSubject("Password Reset - OTP");
+            message.setText(
+                    "Your OTP for password reset is: " + otpCode + "\n\n" +
+                            "This OTP will expire in 5 minutes.\n\n" +
+                            "If you didn't request this, please ignore this email."
+            );
+
+            mailSender.send(message);
+        } catch (Exception e) {
+            throw new EmailSendingException("Failed to send password reset OTP email", e);
+        }
+    }
 }

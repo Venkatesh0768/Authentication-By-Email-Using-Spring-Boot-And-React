@@ -54,6 +54,26 @@ public class OTPService {
         emailService.sendOTPEmail(email, otpCode);
     }
 
+    @Transactional
+    public void generateAndSendPasswordResetOTP(String email) {
+        // Delete existing OTPs (keep only one active code)
+        otpRepository.deleteByEmail(email);
+
+        String otpCode = generateOTPCode();
+        LocalDateTime expiryTime = LocalDateTime.now().plusSeconds(otpExpiration / 1000);
+
+        OTP otp = OTP.builder()
+                .email(email)
+                .otpCode(otpCode)
+                .expiryTime(expiryTime)
+                .build();
+
+        otpRepository.save(otp);
+
+        // Send reset-specific email
+        emailService.sendPasswordResetOTPEmail(email, otpCode);
+    }
+
     public boolean validateOTP(String email, String otpCode) {
         Optional<OTP> otpOptional = otpRepository
                 .findByEmailAndOtpCodeAndVerifiedFalse(email, otpCode);
